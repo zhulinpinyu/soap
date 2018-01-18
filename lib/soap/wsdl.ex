@@ -25,7 +25,8 @@ defmodule Soap.Wsdl do
       endpoint: get_endpoint(wsdl),
       complex_types: get_complex_types(wsdl, schema_namespace),
       operations: get_operations(wsdl),
-      schema_attributes: get_schema_attributes(wsdl)
+      schema_attributes: get_schema_attributes(wsdl),
+      validation_types: get_validation_types(wsdl)
     }
     {:ok, parsed_response}
   end
@@ -72,6 +73,32 @@ defmodule Soap.Wsdl do
   @spec get_complex_types(String.t(), String.t()) :: list()
   def get_complex_types(wsdl, namespace) do
     xpath(wsdl, ~x"//wsdl:types/#{namespace}:schema/#{namespace}:element"l, name: ~x"./@name"s, type: ~x"./@type"s)
+  end
+
+  @spec get_validation_types(String.t()) :: list()
+  def get_validation_types(wsdl) do
+    xpath(wsdl, ~x"//wsdl:types/xsd:schema/xsd:complexType"l)
+    |> Enum.reduce(%{}, &parse_types/2)
+  end
+
+  @spec parse_types(map(), map()) :: map()
+  defp parse_types(type_node, complex_type_acc) do
+    types_map = xpath(type_node, ~x"./xsd:sequence/xsd:element"l)
+    |> Enum.reduce(%{}, &parse_type_attributes/2)
+    Map.put(complex_type_acc, type_node |> xpath(~x"./@name"s), types_map)
+  end
+
+  @spec parse_type_attributes(map(), map()) :: map()
+  defp parse_type_attributes(inner_node, element_acc) do
+    result_map = [:nillable, :minOccurs, :maxOccurs]
+    |> Enum.reduce(%{type: inner_node |> xpath(~x"./@type")}, fn(attr, init_map_acc) ->
+      attr_val = inner_node |> xpath(~x"./@#{attr}"s)
+      case attr_val do
+        "" -> init_map_acc
+        _ -> Map.put(init_map_acc, attr, attr_val)
+      end
+    end)
+    Map.put(element_acc, inner_node |> xpath(~x"./@name"), result_map)
   end
 
   @spec get_operations(String.t()) :: list()

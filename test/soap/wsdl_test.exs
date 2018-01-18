@@ -42,6 +42,30 @@ defmodule Soap.WsdlTest do
     ],
     schema_attributes: %{
       element_form_default: "qualified", target_namespace: "com.esendex.ems.soapinterface"
+    },
+    validation_types: %{
+      "recipients" => %{
+        'recipient' => %{maxOccurs: "unbounded", minOccurs: "0", type: 'xsd:string'}
+      },
+      "results" => %{
+        'result' => %{maxOccurs: "unbounded", minOccurs: "0", type: 'xsd:string'}
+      },
+      "sendMessage" => %{
+        'body' => %{minOccurs: "0", type: 'xsd:string'},
+        'recipient' => %{minOccurs: "0", type: 'xsd:string'},
+        'type' => %{type: 'xsd:string'}
+      },
+      "sendMessageMultipleRecipients" => %{
+        'body' => %{minOccurs: "0", type: 'xsd:string'},
+        'recipients' => %{minOccurs: "0", type: 'tns:recipients'},
+        'type' => %{type: 'xsd:string'}
+      },
+      "sendMessageMultipleRecipientsResponse" => %{
+        'results' => %{minOccurs: "0", type: 'tns:results'}
+      },
+      "sendMessageResponse" => %{
+        'sendMessageResult' => %{minOccurs: "0", type: 'xsd:string'}
+      }
     }
   }
 
@@ -86,5 +110,9 @@ defmodule Soap.WsdlTest do
     ]
 
     assert Wsdl.get_complex_types(@wsdl, schema_namespace) == types
+  end
+
+  test "#get_validation_types returns validation struct" do
+    assert Wsdl.get_validation_types(@wsdl) == @parsed_wsdl.validation_types
   end
 end
