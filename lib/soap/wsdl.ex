@@ -3,22 +3,24 @@ defmodule Soap.Wsdl do
   Provides functions for parsing wsdl file
   """
 
-  import SweetXml, except: [parse: 1]
+  import SweetXml, except: [parse: 1, parse: 2]
+
+  alias Soap.{Xsd, Type}
 
   @spec parse_from_file(String.t()) :: {:ok, map()}
   def parse_from_file(path) do
     {:ok, wsdl} = File.read(path)
-    parse(wsdl)
+    parse(wsdl, path)
   end
 
   @spec parse_from_url(String.t()) :: {:ok, map()}
   def parse_from_url(path) do
     %HTTPoison.Response{body: wsdl} = HTTPoison.get!(path, [], [follow_redirect: true, max_redirect: 5])
-    parse(wsdl)
+    parse(wsdl, path)
   end
 
-  @spec parse(String.t()) :: {:ok, map()}
-  def parse(wsdl) do
+  @spec parse(String.t(), String.t()) :: {:ok, map()}
+  def parse(wsdl, file_path) do
     schema_namespace = get_schema_namespace(wsdl)
     parsed_response = %{
       namespaces: get_namespaces(wsdl, schema_namespace),
@@ -26,7 +28,7 @@ defmodule Soap.Wsdl do
       complex_types: get_complex_types(wsdl, schema_namespace),
       operations: get_operations(wsdl),
       schema_attributes: get_schema_attributes(wsdl),
-      validation_types: get_validation_types(wsdl)
+      validation_types: get_validation_types(wsdl, file_path)
     }
     {:ok, parsed_response}
   end
@@ -75,30 +77,37 @@ defmodule Soap.Wsdl do
     xpath(wsdl, ~x"//wsdl:types/#{namespace}:schema/#{namespace}:element"l, name: ~x"./@name"s, type: ~x"./@type"s)
   end
 
-  @spec get_validation_types(String.t()) :: list()
-  def get_validation_types(wsdl) do
-    xpath(wsdl, ~x"//wsdl:types/xsd:schema/xsd:complexType"l)
-    |> Enum.reduce(%{}, &parse_types/2)
+  @spec get_validation_types(String.t(), String.t()) :: map()
+  def get_validation_types(wsdl, file_path) do
+    Map.merge(
+      Type.get_complex_types(wsdl, "//wsdl:types/xsd:schema/xsd:complexType"),
+      wsdl
+      |> get_full_paths(file_path)
+      |> get_imported_types
+      |> Enum.reduce(%{}, &(Map.merge(&2, &1)))
+    )
   end
 
-  @spec parse_types(map(), map()) :: map()
-  defp parse_types(type_node, complex_type_acc) do
-    types_map = xpath(type_node, ~x"./xsd:sequence/xsd:element"l)
-    |> Enum.reduce(%{}, &parse_type_attributes/2)
-    Map.put(complex_type_acc, type_node |> xpath(~x"./@name"s) |> String.downcase, types_map)
+  @spec get_schema_imports(String.t()) :: list()
+  def get_schema_imports(wsdl) do
+    xpath(wsdl, ~x"//wsdl:types/xsd:schema/xsd:import"l, schema_location: ~x"./@schemaLocation"s)
   end
 
-  @spec parse_type_attributes(map(), map()) :: map()
-  defp parse_type_attributes(inner_node, element_acc) do
-    result_map = [:nillable, :minOccurs, :maxOccurs]
-    |> Enum.reduce(%{type: inner_node |> xpath(~x"./@type"s)}, fn(attr, init_map_acc) ->
-      attr_val = inner_node |> xpath(~x"./@#{attr}"s)
-      case attr_val do
-        "" -> init_map_acc
-        _ -> Map.put(init_map_acc, attr, attr_val)
+  @spec get_full_paths(String.t(), String.t()) :: list(String.t())
+  defp get_full_paths(wsdl, path) do
+    wsdl
+    |> get_schema_imports
+    |> Enum.map(&(path |> Path.dirname |> Path.join(&1.schema_location)))
+  end
+
+  @spec get_imported_types(list()) :: list(map())
+  defp get_imported_types(xsd_paths) do
+    xsd_paths |> Enum.map(fn xsd_path ->
+      case Xsd.parse_from_file(xsd_path) do
+        {:ok, xsd} -> xsd.complex_types
+        _ -> %{}
       end
     end)
-    Map.put(element_acc, inner_node |> xpath(~x"./@name"s), result_map)
   end
 
   @spec get_operations(String.t()) :: list()
